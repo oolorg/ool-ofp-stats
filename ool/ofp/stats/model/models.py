@@ -8,9 +8,19 @@ class Device(models.Model):
 	serial_num = models.CharField(max_length=255)
 	#serial_num = models.IntegerField()
 	mfr_desc = models.CharField(max_length=255)
+	
+	def encode(self):
+		return {
+			'dpid':self.dpid,
+			'sw_desc':self.sw_desc,
+			'hw_desc':self.hw_desc,
+			'db_desc':self.dp_desc,
+			'serial_num':self.serial_num,
+			'mfr_desc':self.mfr_desc
+			}
 
 class PortStats(models.Model):
-	device_id = models.ForeignKey(Device)
+	device = models.ForeignKey(Device)
 	date = models.DateTimeField()
 	port_no = models.BigIntegerField()
 	rx_bytes = models.BigIntegerField()
@@ -29,7 +39,7 @@ class PortStats(models.Model):
 	duration_sec = models.BigIntegerField()
 
 class PortDescStats(models.Model):
-	device_id = models.ForeignKey(Device)
+	device = models.ForeignKey(Device)
 	date = models.DateTimeField()
 	port_no = models.BigIntegerField()
 	name = models.CharField(max_length=255)
@@ -44,7 +54,7 @@ class PortDescStats(models.Model):
 	advertised = models.BigIntegerField()
 
 class FlowStats(models.Model):
-	device_id = models.ForeignKey(Device)
+	device = models.ForeignKey(Device)
 	date = models.DateTimeField()
 	flow_data = models.TextField()
 

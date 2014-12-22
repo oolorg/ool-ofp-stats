@@ -9,13 +9,17 @@ import threading
 import time
 import datetime
 
+from django.db import models as django_models
+from django.db.models import Max
 from django.conf import settings
+from django.core import serializers
+from django.utils import simplejson
 from rest_framework.response import Response
 from oslo.config import cfg
 
 from ool.ofp.stats.common import log
 from ool.ofp.stats.json.response import ResponseMapper, BaseResponse
-from ool.ofp.stats.model.models import Device, PortStats, PortDescStats
+from ool.ofp.stats.model.models import Device, PortStats, PortDescStats, FlowStats
 from ool.ofp.stats.conf.define import OfpStatsDefine
 from ool.ofp.stats.business.stats_request_business import StatsRequestThread
 from ool.ofp.stats.client.ofc_if import OfcClient
@@ -29,6 +33,14 @@ stats_cfg.register_cli_opts(stats_opts)
 stats_cfg(args=['--config-file', settings.BASE_DIR + '/stats/conf/stats.conf'])
 
 LOG = log.getLogger(__name__)
+
+def encode_myway(obj):
+	if isinstance(obj, django_models.Model):
+		return obj.encode()
+	elif isinstance(obj, QuerySet):
+		return list(obj)
+	else:
+		raise TypeError(repr(obj) + " is not JSON serializable")
 
 class StatsBusiness():
 	
@@ -54,14 +66,18 @@ class StatsBusiness():
 		self.th.stop()
 		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=OfpStatsDefine.SUCCESS_MSG)
 
-	def stats_req(self):
+	def stats_req(self, req):
 		LOG.debug("stats_req()")
 		
 		ofc_client = OfcClient("")
 		
 		dpid = None
 		if 'dpid' in req:
-			dpid = int(req['dpid'], 16)
+			dpid = str(hex(int(req['dpid'], 16)))
+			LOG.debug("dpid = " + dpid)
+
+		#for dp in stats_cfg.dpid:
+		#	LOG.debug("dp = " + dp)
 
 		if dpid is not None:
 			if dpid not in stats_cfg.dpid:
@@ -69,6 +85,8 @@ class StatsBusiness():
 
 			bodyData = {'dpid':dpid}
 			body = json.dumps(bodyData, ensure_ascii=True, sort_keys=True)
+			ofc_client.ofc_desc_stats_request(body)
+			time.sleep(0.1)
 			ofc_client.ofc_port_stats_request(body)
 			time.sleep(0.1)
 			ofc_client.ofc_port_desc_stats_request(body)
@@ -90,20 +108,238 @@ class StatsBusiness():
 
 	def desc_stats(self, dpid):
 		LOG.debug("desc_stats() dpid = " + str(dpid))
-		
+		res_data = None
+
 		if dpid is not None:
 			if dpid not in stats_cfg.dpid:
 				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : Bad dpid.")
+
+			dev = Device.objects.filter(dpid=dpid)
+			device = {
+					'dpid':str(dev[0].dpid),
+					'sw_desc':str(dev[0].sw_desc),
+					'hw_desc':dev[0].hw_desc,
+					'dp_desc':dev[0].dp_desc,
+					'serial_num':dev[0].serial_num,
+					'mfr_desc':dev[0].mfr_desc
+					}
+			res_data = device;
+		else:
+			devlist = []
+			#json_serializer = serializers.get_serializer("json")()
+			for datapath_id in stats_cfg.dpid:
+				dev = Device.objects.filter(dpid=datapath_id)
+				device = {
+						'dpid':str(dev[0].dpid),
+						'sw_desc':str(dev[0].sw_desc),
+						'hw_desc':dev[0].hw_desc,
+						'dp_desc':dev[0].dp_desc,
+						'serial_num':dev[0].serial_num,
+						'mfr_desc':dev[0].mfr_desc
+						}
+				devlist.append(device)
+				#LOG.debug(str(datapath_id))
+				#LOG.debug("dev[" + datapath_id + "] = " + str(dev))
+
+			LOG.debug("devlist = " + str(devlist))
+			res_data = devlist
+
+		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=res_data)
+
+	def port_stats(self, dpid):
+		LOG.debug("port_stats() dpid = " + str(dpid))
+		
+		devlist = []
+
+		if dpid is not None:
+			if dpid not in stats_cfg.dpid:
+				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : Bad dpid.")
+
+			portlist = []
+			date_time = PortStats.objects.filter(device__dpid = dpid).aggregate(Max('date'))
+			port_list_data = PortStats.objects.filter(date=date_time["date__max"])#.values()
+			for port in port_list_data:
+				port_data = {
+						'port_no' : port.port_no,
+						'rx_bytes' : port.rx_bytes,
+						'rx_packets' : port.rx_packets,
+						'rx_crc_err' : port.rx_crc_err,
+						'rx_dropped' : port.rx_dropped,
+						'rx_errors' : port.rx_errors,
+						'rx_frame_err' : port.rx_frame_err,
+						'rx_over_err' : port.rx_over_err,
+						'tx_bytes' : port.tx_bytes,
+						'tx_packets' : port.tx_packets,
+						'tx_dropped' : port.tx_dropped,
+						'tx_errors' : port.tx_errors,
+						'collisions' : port.collisions,
+						'duration_nsec' : port.duration_nsec,
+						'duration_sec' : port.duration_sec,
+						'date' : port.date.strftime("%Y-%m-%d %H:%M:%S")
+						}
+				portlist.append(port_data)
+
+			device = {
+				'dpid' : dpid,
+				'port_list' : portlist
+				}
+
+			devlist.append(device)
+
 		else:
 			for datapath_id in stats_cfg.dpid:
 				LOG.debug(str(datapath_id))
 
-		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=OfpStatsDefine.SUCCESS_MSG)
+				portlist = []
+				date_time = PortStats.objects.filter(device__dpid = datapath_id).aggregate(Max('date'))
+				port_list_data = PortStats.objects.filter(date=date_time["date__max"])#.values()
+				for port in port_list_data:
+					port_data = {
+							'port_no' : port.port_no,
+							'rx_bytes' : port.rx_bytes,
+							'rx_packets' : port.rx_packets,
+							'rx_crc_err' : port.rx_crc_err,
+							'rx_dropped' : port.rx_dropped,
+							'rx_errors' : port.rx_errors,
+							'rx_frame_err' : port.rx_frame_err,
+							'rx_over_err' : port.rx_over_err,
+							'tx_bytes' : port.tx_bytes,
+							'tx_packets' : port.tx_packets,
+							'tx_dropped' : port.tx_dropped,
+							'tx_errors' : port.tx_errors,
+							'collisions' : port.collisions,
+							'duration_nsec' : port.duration_nsec,
+							'duration_sec' : port.duration_sec,
+							'date' : port.date.strftime("%Y-%m-%d %H:%M:%S")
+							}
+					portlist.append(port_data)
+
+				device = {
+					'dpid' : datapath_id,
+					'port_list' : portlist
+					}
+
+				devlist.append(device)
+
+		res_data = json.dumps(devlist, ensure_ascii = False, sort_keys = True)#, indent=4)
+
+		#LOG.debug(res_data)
+		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=res_data)
+
+	def port_desc_stats(self, dpid):
+		LOG.debug("port_desc_stats() dpid = " + str(dpid))
+		
+		devlist = []
+
+		if dpid is not None:
+			if dpid not in stats_cfg.dpid:
+				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : Bad dpid.")
+
+			port_desc_list = []
+			date_time = PortDescStats.objects.filter(device__dpid = dpid).aggregate(Max('date'))
+			port_desc_list_data = PortDescStats.objects.filter(date=date_time["date__max"])#.values()
+			for port_desc in port_desc_list_data:
+				port_desc_data = {
+						'port_no' : port_desc.port_no,
+						'name' : port_desc.name,
+						'hw_addr' : port_desc.hw_addr,
+						'config' : port_desc.config,
+						'state' : port_desc.state,
+						'curr' : port_desc.curr,
+						'curr_speed' : port_desc.curr_speed,
+						'max_speed' : port_desc.max_speed,
+						'peer' : port_desc.peer,
+						'supported' : port_desc.supported,
+						'advertised' : port_desc.advertised,
+						'date' : port_desc.date.strftime("%Y-%m-%d %H:%M:%S")
+						}
+				port_desc_list.append(port_desc_data)
+
+			device = {
+				'dpid' : dpid,
+				'port_desc_list' : port_desc_list
+				}
+
+			devlist.append(device)
+
+		else:
+			for datapath_id in stats_cfg.dpid:
+				LOG.debug(str(datapath_id))
+
+				port_desc_list = []
+				date_time = PortDescStats.objects.filter(device__dpid = datapath_id).aggregate(Max('date'))
+				port_desc_list_data = PortDescStats.objects.filter(date=date_time["date__max"])#.values()
+				for port_desc in port_desc_list_data:
+					port_desc_data = {
+							'port_no' : port_desc.port_no,
+							'name' : port_desc.name,
+							'hw_addr' : port_desc.hw_addr,
+							'config' : port_desc.config,
+							'state' : port_desc.state,
+							'curr' : port_desc.curr,
+							'curr_speed' : port_desc.curr_speed,
+							'max_speed' : port_desc.max_speed,
+							'peer' : port_desc.peer,
+							'supported' : port_desc.supported,
+							'advertised' : port_desc.advertised,
+							'date' : port_desc.date.strftime("%Y-%m-%d %H:%M:%S")
+							}
+					port_desc_list.append(port_desc_data)
+
+				device = {
+					'dpid' : datapath_id,
+					'port_desc_list' : port_desc_list
+					}
+
+				devlist.append(device)
+
+		res_data = json.dumps(devlist, ensure_ascii = False, sort_keys = True)#, indent=4)
+
+		#LOG.debug(res_data)
+		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=res_data)
+
+	def flow_stats(self, dpid):
+		LOG.debug("flow_stats() dpid = " + str(dpid))
+		
+		devlist = []
+
+		if dpid is not None:
+			if dpid not in stats_cfg.dpid:
+				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : Bad dpid.")
+
+			flow_list = []
+			date_time = FlowStats.objects.filter(device__dpid = dpid).aggregate(Max('date'))
+			flow_list_data = FlowStats.objects.filter(date=date_time["date__max"])#.values()
+			for flow in flow_list_data:
+				flow_data = {
+						'flow_data' : json.loads(flow.flow_data),
+						'date' : flow.date.strftime("%Y-%m-%d %H:%M:%S")
+						}
+				flow_list.append(flow_data)
+
+			device = {
+				'dpid' : dpid,
+				'flow_list' : flow_list
+				}
+
+			devlist.append(device)
+
+		else:
+			for datapath_id in stats_cfg.dpid:
+				LOG.debug(str(datapath_id))
+
+
+				devlist.append(device)
+
+		res_data = str(json.dumps(devlist, ensure_ascii = False, sort_keys = True))#, indent=4)
+
+		LOG.debug(res_data)
+		return Response(status=OfpStatsDefine.HTTP_STATUS_SUCCESS, data=res_data)
 
 	def set_desc_stats(self, req):
 		dpid = None
 		if 'dpid' in req:
-			dpid = int(req['dpid'], 16)
+			dpid = req['dpid']#int(req['dpid'], 16)
 			if dpid is None:
 				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : dpid is None")
 		else:
@@ -202,7 +438,7 @@ class StatsBusiness():
 
 		dpid = None
 		if 'dpid' in req:
-			dpid = int(req['dpid'], 16)
+			dpid = str(hex(int(req['dpid'], 16)))
 			if dpid is None:
 				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : dpid is None")
 		else:
@@ -388,7 +624,8 @@ class StatsBusiness():
 
 		dpid = None
 		if 'dpid' in req:
-			dpid = int(req['dpid'], 16)
+			#dpid = int(req['dpid'], 16)
+			dpid = str(hex(int(req['dpid'], 16)))
 			if dpid is None:
 				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : dpid is None")
 		else:
@@ -536,7 +773,8 @@ class StatsBusiness():
 
 		dpid = None
 		if 'dpid' in req:
-			dpid = int(req['dpid'], 16)
+			#dpid = int(req['dpid'], 16)
+			dpid = str(hex(int(req['dpid'], 16)))
 			if dpid is None:
 				return Response(status=OfpStatsDefine.HTTP_STATUS_BAD_REQUEST, data= OfpStatsDefine.ERR_MSG_BAD_REQUEST + " : dpid is None")
 		else:

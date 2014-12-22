@@ -4,7 +4,7 @@ from django.contrib import admin
 admin.autodiscover()
 
 from ool.ofp.stats.service.endpoint import set_desc_stats, set_port_stats, set_port_desc_stats, set_flow_stats
-from ool.ofp.stats.service.endpoint import datapathid_list, desc, stats_req, stats_req_start, stats_req_stop
+from ool.ofp.stats.service.endpoint import datapathid_list, desc, port, port_desc, flow, stats_req, stats_req_start, stats_req_stop
 
 urlpatterns = patterns('',
     # Examples:
@@ -19,6 +19,12 @@ urlpatterns = patterns('',
 	url(r'^ofpm/stats/datapathid_list$', datapathid_list),
 	url(r'^ofpm/stats/desc$', desc),
 	url(r'^ofpm/stats/desc/(?P<dpid>\w+)$', desc),
+	url(r'^ofpm/stats/port$', port),
+	url(r'^ofpm/stats/port/(?P<dpid>\w+)$', port),
+	url(r'^ofpm/stats/port_desc$', port_desc),
+	url(r'^ofpm/stats/port_desc/(?P<dpid>\w+)$', port_desc),
+	url(r'^ofpm/stats/flow$', flow),
+	url(r'^ofpm/stats/flow/(?P<dpid>\w+)$', flow),
 	url(r'^ofpm/stats/stats_req$', stats_req),
 	url(r'^ofpm/stats/stats_req_start$', stats_req_start),
 	url(r'^ofpm/stats/stats_req_stop$', stats_req_stop),

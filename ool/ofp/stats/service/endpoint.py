@@ -133,6 +133,33 @@ def desc(request, dpid=None):
 		LOG.exception(e.message)
 	return x
 
+@api_view(['GET'])
+def port(request, dpid=None):
+	x = Response(status=OfpStatsDefine.HTTP_STATUS_INTL_SRV_ERR, data=OfpStatsDefine.ERR_MSF_INT_SRV_ERR)
+	try:
+		x = biz.port_stats(dpid)
+	except Exception as e:
+		LOG.exception(e.message)
+	return x
+
+@api_view(['GET'])
+def port_desc(request, dpid=None):
+	x = Response(status=OfpStatsDefine.HTTP_STATUS_INTL_SRV_ERR, data=OfpStatsDefine.ERR_MSF_INT_SRV_ERR)
+	try:
+		x = biz.port_desc_stats(dpid)
+	except Exception as e:
+		LOG.exception(e.message)
+	return x
+
+@api_view(['GET'])
+def flow(request, dpid=None):
+	x = Response(status=OfpStatsDefine.HTTP_STATUS_INTL_SRV_ERR, data=OfpStatsDefine.ERR_MSF_INT_SRV_ERR)
+	try:
+		x = biz.flow_stats(dpid)
+	except Exception as e:
+		LOG.exception(e.message)
+	return x
+
 @api_view(['POST'])
 @parser_classes((JSONParser,))
 @renderer_classes((JSONRenderer,))
